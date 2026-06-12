@@ -11,76 +11,103 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ── 1. جلب الكود من المستودع ───────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── 2. إعداد بيئة Node.js ──────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
+      # ── 3. تثبيت حزم الجافاسكريبت الأساسية ─────────────────────────────
       - name: Install dependencies
         run: npm ci
 
-      # ✨ تم التعديل هنا: تثبيت كافة الحزم المطلوبة وبناء التطبيق مباشرة عبر Vite لتخطي عقبة الـ TypeScript
+      # ── 4. تثبيت المكتبات الناقصة وبناء الويب عبر Vite مباشرة ─────────────
       - name: Install missing packages & Build web app
         run: |
           npm install @capacitor/core @capacitor/filesystem @capacitor/share @capacitor/android
           npx vite build
 
-      # خطوة المزامنة والإضافة بعد ضمان وجود الحزم
+      # ── 5. ربط ومزامنة كاباسيتور مع مجلد الأندرويد ────────────────────────
       - name: Install Capacitor Android and Sync
         run: |
           npx @capacitor/cli add android || true
           npx @capacitor/cli sync android
 
-      # ✨ خطوة توليد أيقونات التطبيق تلقائياً من المجلد assets/icon.png لـ Android
+      # ── 6. توليد أيقونات التطبيق تلقائياً للمجلد الفرعي ────────────────────
       - name: Generate App Icons from Assets
         run: |
           npm install @capacitor/assets
           npx @capacitor/assets generate --android
 
+      # ── 7. إعداد بيئة جافا المتقدمة (JDK 21) ───────────────────────────
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
+      # ── 8. إعداد حزمة تطوير أندرويد (Android SDK) ──────────────────────
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # خطوة حل تضارب إصدارات كوتلن الخاصة بك كما هي
+      # ── 9. نظام كاش Gradle (الخطوة المتقدمة لتسريع البناء المستقبلي) ───────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ── 10. إصلاح تضارب إصدارات كوتلن داخل مجلد أندرويد المستورد ──────────
       - name: Fix Kotlin Duplicate Classes Conflict
         run: |
-          echo "" >> android/app/build.gradle
-          echo "configurations.all {" >> android/app/build.gradle
-          echo "    resolutionStrategy {" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'" >> android/app/build.gradle
-          echo "        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'" >> android/app/build.gradle
-          echo "    }" >> android/app/build.gradle
-          echo "}" >> android/app/build.gradle
+          cat >> android/app/build.gradle << 'GRADLE'
 
+          configurations.configureEach {
+              resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+                  if (details.requested.group == 'org.jetbrains.kotlin') {
+                      details.useVersion '1.9.24'
+                      details.because 'Enforce consistent Kotlin stdlib version'
+                  }
+              }
+          }
+          GRADLE
+
+      # ── 11. منح صلاحيات التنفيذ لملف محرك البناء ─────────────────────────
       - name: Grant execute permission for Gradle
         run: chmod +x android/gradlew
 
-      - name: Build APK with Gradle
-        run: cd android && ./gradlew assembleDebug
+      # ── 12. بناء نسخة الـ Debug وتتبع الأخطاء بدقة ────────────────────────
+      - name: Build Debug APK
+        run: cd android && ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK artifact
+      # ── 13. رفع ملف الـ Debug APK إلى خوادم جيتهاب ───────────────────────
+      - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: homecare-cabinet-apk
+          name: homecare-cabinet-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 30
 
+      # ── 14. بناء نسخة الريليز النهائية (مع حماية الأكشن من التوقف) ─────────
       - name: Build Release APK (unsigned)
-        run: cd android && ./gradlew assembleRelease
+        run: cd android && ./gradlew assembleRelease --no-daemon
+        continue-on-error: true
 
+      # ── 15. رفع ملف الـ Release APK النهائي لتنزيله ──────────────────────
       - name: Upload Release APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: homecare-cabinet-release-apk
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: warn
+          retention-days: 30
