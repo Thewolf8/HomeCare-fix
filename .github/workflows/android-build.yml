@@ -23,16 +23,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web app
-        run: npm run build
+      # ✨ تم التعديل هنا: تثبيت كافة الحزم المطلوبة وبناء التطبيق مباشرة عبر Vite لتخطي عقبة الـ TypeScript
+      - name: Install missing packages & Build web app
+        run: |
+          npm install @capacitor/core @capacitor/filesystem @capacitor/share @capacitor/android
+          npx vite build
 
+      # خطوة المزامنة والإضافة بعد ضمان وجود الحزم
       - name: Install Capacitor Android and Sync
         run: |
-          npm install @capacitor/android
           npx @capacitor/cli add android || true
           npx @capacitor/cli sync android
 
-      # ✨ الخطوة الجديدة: توليد أيقونات التطبيق تلقائياً من المجلد assets/icon.png لـ Android
+      # ✨ خطوة توليد أيقونات التطبيق تلقائياً من المجلد assets/icon.png لـ Android
       - name: Generate App Icons from Assets
         run: |
           npm install @capacitor/assets
@@ -47,7 +50,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # خطوة حل تضارب إصدارات كوتلن
+      # خطوة حل تضارب إصدارات كوتلن الخاصة بك كما هي
       - name: Fix Kotlin Duplicate Classes Conflict
         run: |
           echo "" >> android/app/build.gradle
